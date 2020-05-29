@@ -41,6 +41,9 @@ static void thread_func(void *p1, void *p2, void *p3)
 	int buf_len = 8*id + 8;
 	u8_t *buf = alloca(buf_len);
 
+	/* Set buffer with valid data to avoid unexpected data */
+	memset(buf, 0x30,buf_len);
+
 	while (1) {
 		LOG_INF("test string printed %d %d %p", 1, 2, k_current_get());
 		LOG_HEXDUMP_INF(buf, buf_len, "data:");
