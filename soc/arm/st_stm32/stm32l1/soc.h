@@ -21,6 +21,9 @@
 
 #include <stm32l1xx.h>
 
+/* Add include for DTS generated information */
+#include <devicetree.h>
+
 /* ARM CMSIS definitions must be included before kernel_includes.h.
  * Therefore, it is essential to include kernel_includes.h after including
  * core SOC-specific headers.
