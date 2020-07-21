@@ -27,7 +27,8 @@ LOG_MODULE_REGISTER(adc_stm32);
 #include <drivers/clock_control/stm32_clock_control.h>
 
 #if !defined(CONFIG_SOC_SERIES_STM32F0X) && \
-	!defined(CONFIG_SOC_SERIES_STM32L0X)
+	!defined(CONFIG_SOC_SERIES_STM32L0X) && \
+	!defined(CONFIG_SOC_SERIES_STM32G0X)
 #define RANK(n)		LL_ADC_REG_RANK_##n
 static const uint32_t table_rank[] = {
 	RANK(1),
@@ -146,7 +147,7 @@ static const uint32_t table_samp_time[] = {
 	SMP_TIME(239, S_5),
 };
 #endif /* ADC5_V1_1 */
-#elif defined(CONFIG_SOC_SERIES_STM32L0X)
+#elif defined(CONFIG_SOC_SERIES_STM32L0X) || defined(CONFIG_SOC_SERIES_STM32G0X)
 static const uint16_t acq_time_tbl[8] = {2, 4, 8, 13, 20, 40, 80, 161};
 static const uint32_t table_samp_time[] = {
 	SMP_TIME(1,   _5),
@@ -209,7 +210,9 @@ struct adc_stm32_data {
 
 	uint8_t resolution;
 	uint8_t channel_count;
-#if defined(CONFIG_SOC_SERIES_STM32F0X) || defined(CONFIG_SOC_SERIES_STM32L0X)
+#if defined(CONFIG_SOC_SERIES_STM32F0X) || \
+	defined(CONFIG_SOC_SERIES_STM32L0X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X)
 	int8_t acq_time_index;
 #endif
 };
@@ -252,6 +255,7 @@ static void adc_stm32_start_conversion(struct device *dev)
 
 #if defined(CONFIG_SOC_SERIES_STM32F0X) || \
 	defined(CONFIG_SOC_SERIES_STM32F3X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X) || \
 	defined(CONFIG_SOC_SERIES_STM32L0X) || \
 	defined(CONFIG_SOC_SERIES_STM32L4X) || \
 	defined(CONFIG_SOC_SERIES_STM32WBX) || \
@@ -328,7 +332,8 @@ static int start_read(struct device *dev, const struct adc_sequence *sequence)
 #endif
 
 #if defined(CONFIG_SOC_SERIES_STM32F0X) || \
-	defined(CONFIG_SOC_SERIES_STM32L0X)
+	defined(CONFIG_SOC_SERIES_STM32L0X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X)
 	LL_ADC_REG_SetSequencerChannels(adc, channel);
 #else
 	LL_ADC_REG_SetSequencerRanks(adc, table_rank[0], channel);
@@ -347,6 +352,7 @@ static int start_read(struct device *dev, const struct adc_sequence *sequence)
 
 #if defined(CONFIG_SOC_SERIES_STM32F0X) || \
 	defined(CONFIG_SOC_SERIES_STM32F3X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X) || \
 	defined(CONFIG_SOC_SERIES_STM32L0X) || \
 	defined(CONFIG_SOC_SERIES_STM32L4X) || \
 	defined(CONFIG_SOC_SERIES_STM32WBX) || \
@@ -453,8 +459,15 @@ static void adc_stm32_setup_speed(struct device *dev, uint8_t id,
 		(const struct adc_stm32_cfg *)dev->config_info;
 	ADC_TypeDef *adc = config->base;
 
-#if defined(CONFIG_SOC_SERIES_STM32F0X) || defined(CONFIG_SOC_SERIES_STM32L0X)
+#if defined(CONFIG_SOC_SERIES_STM32F0X) || defined(CONFIG_SOC_SERIES_STM32L0X) 
 	LL_ADC_SetSamplingTimeCommonChannels(adc,
+		table_samp_time[acq_time_index]);
+#elif defined(CONFIG_SOC_SERIES_STM32G0X)
+	LL_ADC_SetChannelSamplingTime(adc,
+		__LL_ADC_DECIMAL_NB_TO_CHANNEL(id),
+		LL_ADC_SAMPLINGTIME_COMMON_1);
+	LL_ADC_SetSamplingTimeCommonChannels(adc,
+		LL_ADC_SAMPLINGTIME_COMMON_1,
 		table_samp_time[acq_time_index]);
 #else
 	LL_ADC_SetChannelSamplingTime(adc,
@@ -466,7 +479,9 @@ static void adc_stm32_setup_speed(struct device *dev, uint8_t id,
 static int adc_stm32_channel_setup(struct device *dev,
 			    const struct adc_channel_cfg *channel_cfg)
 {
-#if defined(CONFIG_SOC_SERIES_STM32F0X) || defined(CONFIG_SOC_SERIES_STM32L0X)
+#if defined(CONFIG_SOC_SERIES_STM32F0X) || \
+	defined(CONFIG_SOC_SERIES_STM32L0X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X)
 	struct adc_stm32_data *data = dev->driver_data;
 #endif
 	int acq_time_index;
@@ -481,11 +496,13 @@ static int adc_stm32_channel_setup(struct device *dev,
 	if (acq_time_index < 0) {
 		return acq_time_index;
 	}
-#if defined(CONFIG_SOC_SERIES_STM32F0X) || defined(CONFIG_SOC_SERIES_STM32L0X)
+#if defined(CONFIG_SOC_SERIES_STM32F0X) || \
+	defined(CONFIG_SOC_SERIES_STM32L0X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X)
 	if (data->acq_time_index == -1) {
 		data->acq_time_index = acq_time_index;
 	} else {
-		/* All channels of F0/L0 must have identical acquisition time.*/
+		/* All channels of F0/L0/G0 must have identical acquisition time.*/
 		if (acq_time_index != data->acq_time_index) {
 			return -EINVAL;
 		}
@@ -532,7 +549,8 @@ static void adc_stm32_calib(struct device *dev)
 	defined(CONFIG_SOC_SERIES_STM32G4X)
 	LL_ADC_StartCalibration(adc, LL_ADC_SINGLE_ENDED);
 #elif defined(CONFIG_SOC_SERIES_STM32F0X) || \
-	defined(CONFIG_SOC_SERIES_STM32L0X)
+	defined(CONFIG_SOC_SERIES_STM32L0X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X)
 	LL_ADC_StartCalibration(adc);
 #elif defined(CONFIG_SOC_SERIES_STM32H7X)
 	LL_ADC_StartCalibration(adc, LL_ADC_CALIB_OFFSET, LL_ADC_SINGLE_ENDED);
@@ -553,9 +571,11 @@ static int adc_stm32_init(struct device *dev)
 	LOG_DBG("Initializing....");
 
 	data->dev = dev;
-#if defined(CONFIG_SOC_SERIES_STM32F0X) || defined(CONFIG_SOC_SERIES_STM32L0X)
+#if defined(CONFIG_SOC_SERIES_STM32F0X) || \
+	defined(CONFIG_SOC_SERIES_STM32L0X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X)
 	/*
-	 * All conversion time for all channels on one ADC instance for F0 and
+	 * All conversion time for all channels on one ADC instance for F0, G0 and
 	 * L0 series chips has to be the same. This additional variable is for
 	 * checking if the conversion time selection of all channels on one ADC
 	 * instance is the same.
@@ -593,7 +613,8 @@ static int adc_stm32_init(struct device *dev)
 #endif
 
 #if defined(CONFIG_SOC_SERIES_STM32F0X) || \
-	defined(CONFIG_SOC_SERIES_STM32L0X)
+	defined(CONFIG_SOC_SERIES_STM32L0X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X)
 	LL_ADC_SetClock(adc, LL_ADC_CLOCK_SYNC_PCLK_DIV4);
 #elif defined(CONFIG_SOC_SERIES_STM32F3X) || \
 	defined(CONFIG_SOC_SERIES_STM32L4X) || \
@@ -620,6 +641,7 @@ static int adc_stm32_init(struct device *dev)
 #endif
 
 #if defined(CONFIG_SOC_SERIES_STM32F0X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X) || \
 	defined(CONFIG_SOC_SERIES_STM32L0X) || \
 	defined(CONFIG_SOC_SERIES_STM32L4X) || \
 	defined(CONFIG_SOC_SERIES_STM32WBX) || \
@@ -639,6 +661,7 @@ static int adc_stm32_init(struct device *dev)
 
 #if defined(CONFIG_SOC_SERIES_STM32F0X) || \
 	defined(CONFIG_SOC_SERIES_STM32F3X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X) || \
 	defined(CONFIG_SOC_SERIES_STM32L0X) || \
 	defined(CONFIG_SOC_SERIES_STM32L4X) || \
 	defined(CONFIG_SOC_SERIES_STM32WBX) || \
