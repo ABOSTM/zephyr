@@ -63,7 +63,7 @@ static int entropy_stm32_got_error(RNG_TypeDef *rng)
 	return 0;
 }
 
-static int entropy_stm32_wait_ready(RNG_TypeDef *rng)
+static int entropy_stm32_wait_ready(RNG_TypeDef *rng, uint32_t flags)
 {
 	/* Agording to the reference manual it takes 40 periods
 	 * of the RNG_CLK clock signal between two consecutive
@@ -89,7 +89,16 @@ static int entropy_stm32_wait_ready(RNG_TypeDef *rng)
 			return -ETIMEDOUT;
 		}
 
-		k_yield();
+		if ((flags & ENTROPY_BUSYWAIT) == 0U) {
+			/* This internal function is used by both get_entropy,
+			 * and get_entropy_isr APIs. The later may call this
+			 * function with the ENTROPY_BUSYWAIT flag set. In
+			 * that case make no assumption that the kernel is
+			 * initialized when the function is called; so, just
+			 * do busy-wait for the random data to be ready.
+			 */
+			k_yield();
+		}
 	}
 
 	if (entropy_stm32_got_error(rng)) {
@@ -99,8 +108,8 @@ static int entropy_stm32_wait_ready(RNG_TypeDef *rng)
 	}
 }
 
-static int entropy_stm32_rng_get_entropy(struct device *dev, uint8_t *buffer,
-					 uint16_t length)
+static int entropy_stm32_rng_get_entropy_internal(struct device *dev, uint8_t *buffer,
+					 uint16_t length, uint32_t flags)
 {
 	struct entropy_stm32_rng_dev_data *dev_data;
 	int n = sizeof(uint32_t);
@@ -122,7 +131,7 @@ static int entropy_stm32_rng_get_entropy(struct device *dev, uint8_t *buffer,
 		uint32_t rndbits;
 		uint8_t *p_rndbits = (uint8_t *)&rndbits;
 
-		res = entropy_stm32_wait_ready(dev_data->rng);
+		res = entropy_stm32_wait_ready(dev_data->rng, flags);
 		if (res < 0)
 			return res;
 
@@ -139,6 +148,68 @@ static int entropy_stm32_rng_get_entropy(struct device *dev, uint8_t *buffer,
 	}
 
 	return 0;
+}
+
+static int entropy_stm32_rng_get_entropy_isr(struct device *dev, uint8_t *buffer,
+				   uint16_t length, uint32_t flags)
+{
+	uint16_t cnt = length;
+	int n = sizeof(uint32_t);
+	struct entropy_stm32_rng_dev_data *dev_data;
+
+	__ASSERT_NO_MSG(dev != NULL);
+	__ASSERT_NO_MSG(buffer != NULL);
+
+	dev_data = DEV_DATA(dev);
+
+	__ASSERT_NO_MSG(dev_data != NULL);
+
+	if ((flags & ENTROPY_BUSYWAIT) == 0U) {
+		/* No busy wait; return whatever data is available. */
+
+		while (length > 0) {
+			uint32_t rndbits;
+			uint8_t *p_rndbits = (uint8_t *)&rndbits;
+
+			if (!LL_RNG_IsActiveFlag_DRDY(dev_data->rng)) {
+				/* Data not ready */
+				break;
+			}
+			if (entropy_stm32_got_error(dev_data->rng)) {
+				return -EIO;
+			}
+
+			rndbits = LL_RNG_ReadRandData32(dev_data->rng);
+
+			if (length < sizeof(uint32_t))
+				n = length;
+
+			for (int i = 0; i < n; i++) {
+				*buffer++ = *p_rndbits++;
+			}
+
+			length -= n;
+		}
+		return cnt - length;
+
+	} else {
+			/* Allowed to busy-wait */
+		int ret = entropy_stm32_rng_get_entropy_internal(dev,
+				buffer, length, flags);
+
+		if (ret == 0) {
+			/* Data retrieved successfully. */
+			return cnt;
+		}
+
+		return ret;
+	}
+}
+
+static int entropy_stm32_rng_get_entropy(struct device *dev, uint8_t *buffer,
+					 uint16_t length)
+{
+	return entropy_stm32_rng_get_entropy_internal(dev, buffer, length, 0);
 }
 
 static int entropy_stm32_rng_init(struct device *dev)
@@ -210,7 +281,8 @@ static int entropy_stm32_rng_init(struct device *dev)
 }
 
 static const struct entropy_driver_api entropy_stm32_rng_api = {
-	.get_entropy = entropy_stm32_rng_get_entropy
+	.get_entropy = entropy_stm32_rng_get_entropy,
+	.get_entropy_isr = entropy_stm32_rng_get_entropy_isr
 };
 
 static const struct entropy_stm32_rng_dev_cfg entropy_stm32_rng_config = {
